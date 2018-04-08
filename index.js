@@ -1,0 +1,163 @@
+const request = require('request');
+const console_stamp = require('console-stamp');
+const commandline_args = require('command-line-args');
+
+console_stamp(console, 'HH:MM:ss.l');
+
+function DeleteOldSessionsTool() {
+
+	const options_definitions = [
+		{ name: 'help', alias: 'h', type: Boolean },
+		{ name: 'delete', type: Boolean, defaultOption: false },
+		{ name: 'days', type: Number },
+		{ name: 'user', type: String },
+		{ name: 'api-key', type: String },
+		{ name: 'endpoint', type: String }
+	];
+
+	function search(endpoint, auth, predicates, callback) {
+
+		var options = {
+			auth: auth,
+			form: {
+				"predicates": JSON.stringify(predicates),
+				"fields": "url",
+				"per_page": 5000,
+				"sort": "recorded_at",
+				"order": "desc"
+			}
+		};
+
+		var req = request.post("https://" + endpoint + "/api/1/search/", options, callback);
+	}
+
+	function list_response(endpoint, parsed) {
+
+		console.log("Found " + parsed.total_count + " sessions that match search");
+
+		for (var i = 0; i < parsed.sessions.length; i++) {
+			console.log("Session URL: " + "https://" + endpoint + parsed.sessions[i].url);
+		}
+	}
+
+	function delete_response(endpoint, auth, parsed) {
+
+		console.log("Deleting " + parsed.total_count + " sessions that match search");
+
+		var urls = [];
+		for (var i = 0; i < parsed.sessions.length; i++) {
+			urls.push("https://" + endpoint + "/api/1" + parsed.sessions[i].url);
+		}
+
+		var delete_next = function () {
+			var url = urls.pop();
+			if (url) {
+				console.log("Deleting session: " + url);
+				request.del(url, {auth: auth}, function (err, response, body) {
+					const parsed = JSON.parse(body);
+					if (!parsed.status || parsed.status != "ok") {
+						console.error("Failed to delete session " + url + ", got response: " + body);
+						return;
+					}
+
+					delete_next();
+				});
+			}
+		};
+
+		delete_next();
+	}
+
+	function fetch_sessions(endpoint, auth, days, del) {
+
+		var predicates = [
+			{
+				"type": "date",
+				"attribute": "recorded_at",
+				"comparison": "lt",
+				"value": "now-" + days + "d/d"
+			}
+		];
+
+		console.log("Running a search for sessions older than " + days + " days");
+
+		var handler = function(err, response, body) {
+
+			if (err) {
+				console.error("Failed to run query: " + err);
+				return;
+			}
+
+			const parsed = JSON.parse(body);
+			if (!("sessions" in parsed)) {
+				console.error("Failed to run query: " + body);
+				return;
+			}
+
+			if (del) {
+				delete_response(endpoint, auth, parsed);
+			} else {
+				list_response(endpoint, parsed);
+			}
+		};
+
+		search(endpoint, auth, predicates, handler);
+	}
+
+	function help() {
+		console.log("node index.js --endpoint \"subdomain.testfairy.com\" --user \"email@example.com\" --api-key \"0123456789abcdef\" --days 30 [--delete]");
+		console.log("");
+		console.log("Run a search for sessions older than given number of days. By default will only list session urls");
+		console.log("to screen. Use --delete to also delete these sessions. Warning: once deleted, a session cannot be");
+		console.log("restored from backup.");
+		process.exit(0);
+	}
+
+	this.main = function() {
+		//fetch_sessions();
+		var options = commandline_args(options_definitions);
+
+		if (options == {} || options.help) {
+			help();
+		}
+
+		const required = ["endpoint", "user", "api-key", "days"];
+		for (var i=0; i<required.length; i++) {
+			var k = required[i];
+			if (!(k in options)) {
+				console.error("Missing value of option \"" + k + "\"");
+				help();
+			}
+		}
+
+		var auth = {
+			"user": options["user"],
+			"pass": options["api-key"]
+		};
+
+		var days = parseInt(options.days);
+		if (days <= 0 || isNaN(days)) {
+			console.error("Invalid value for 'days' option");
+			help();
+		}
+
+		var del = false;
+		if ("delete" in options) {
+			del = true;
+			console.log("We will be deleting sessions older than " + days + " days");
+		}
+
+		var endpoint = options.endpoint;
+		if (endpoint.indexOf(":") >= 0 || endpoint.indexOf("/") >= 0) {
+			console.error("Invalid value for option \"endpoint\". Please supply only domain name, for example: \"mycompany.testfairy.com\".");
+			help();
+		}
+
+		fetch_sessions(endpoint, auth, days, del);
+	};
+
+	return this;
+}
+
+var tool = new DeleteOldSessionsTool();
+tool.main();
