@@ -1,1 +1,0 @@
-# delete-old-sessions-tool
