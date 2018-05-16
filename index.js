@@ -22,13 +22,52 @@ function DeleteOldSessionsTool() {
 			form: {
 				"predicates": JSON.stringify(predicates),
 				"fields": "url",
-				"per_page": 5000,
+				"per_page": 250,
 				"sort": "recorded_at",
 				"order": "desc"
 			}
 		};
 
-		var req = request.post("https://" + endpoint + "/api/1/search/", options, callback);
+		var parsed = {
+			total_count: 0,
+			sessions: []
+		};
+
+		function fetch_page() {
+
+			var handler = function(err, response, body) {
+				
+				if (err) {
+					console.error("Failed to run query: " + err);
+					return;
+				}
+
+				var json = JSON.parse(body);
+				if (!json.sessions) {
+					console.error("Can't find sessions int oresponse: " + body);
+					return;
+				}
+
+				if (json.sessions.length > 0) {
+					parsed.total_count = json.total_count;
+					parsed.sessions = parsed.sessions.concat(json.sessions);
+
+					options.form.page++;
+					setTimeout(() => fetch_page(), 1);
+				}
+
+				if (json.sessions.length == 0) {
+					// we're done
+					callback(parsed);
+				}
+			}
+
+			console.log("Running query for page " + options.form.page);
+			request.post("https://" + endpoint + "/api/1/search/", options, handler);
+		}
+
+		options.form.page = 0;
+		setTimeout(() => fetch_page(), 1);
 	}
 
 	function list_response(endpoint, parsed) {
@@ -81,19 +120,7 @@ function DeleteOldSessionsTool() {
 
 		console.log("Running a search for sessions older than " + days + " days");
 
-		var handler = function(err, response, body) {
-
-			if (err) {
-				console.error("Failed to run query: " + err);
-				return;
-			}
-
-			const parsed = JSON.parse(body);
-			if (!("sessions" in parsed)) {
-				console.error("Failed to run query: " + body);
-				return;
-			}
-
+		var handler = function(parsed) {
 			if (del) {
 				delete_response(endpoint, auth, parsed);
 			} else {
