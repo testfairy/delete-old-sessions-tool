@@ -44,7 +44,7 @@ function DeleteOldSessionsTool() {
 
 				var json = JSON.parse(body);
 				if (!json.sessions) {
-					console.error("Can't find sessions int oresponse: " + body);
+					console.error("Can't find sessions in response: " + body);
 					return;
 				}
 
@@ -188,3 +188,4 @@ function DeleteOldSessionsTool() {
 
 var tool = new DeleteOldSessionsTool();
 tool.main();
+
